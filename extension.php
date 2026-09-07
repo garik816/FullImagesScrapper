@@ -22,6 +22,10 @@ final class FullImagesScrapperExtension extends Minz_Extension
     private int $solverrTimeout = self::DEFAULT_SOLVERR_TIMEOUT;
     /** @var array<string, string|null> */
     private array $fastpicOriginals = [];
+    /** @var array<string, string|null> */
+    private array $turboImageHostOriginals = [];
+    /** @var array<string, string|null> */
+    private array $imageBanOriginals = [];
 
     public function init(): void
     {
@@ -236,6 +240,7 @@ final class FullImagesScrapperExtension extends Minz_Extension
         if (in_array($host, [
             'tapochek.net', 'www.tapochek.net',
             'pornolab.net', 'www.pornolab.net',
+            'nnmclub.to', 'www.nnmclub.to',
             'rutracker.org', 'www.rutracker.org',
             'rutracker.net', 'www.rutracker.net',
             'rutracker.nl', 'www.rutracker.nl',
@@ -488,7 +493,7 @@ final class FullImagesScrapperExtension extends Minz_Extension
     /** @return list<string> */
     private function getPageImages(string $pageUrl, ?FreshRSS_Entry $entry = null): array
     {
-        $cacheFile = $this->cacheFile('page:v1.7.3:' . $pageUrl);
+        $cacheFile = $this->cacheFile('page:v1.8.2:' . $pageUrl);
         $stale = $this->readCache($cacheFile, false);
         $fresh = $this->readCache($cacheFile, true);
         if ($fresh !== null && $fresh !== []) {
@@ -676,6 +681,158 @@ final class FullImagesScrapperExtension extends Minz_Extension
         $viewerUrl = 'https://fastpic.ru/view/' . $matches[1] . '/' . $matches[2] . '/' . $matches[3] . '.html';
         $this->fastpicOriginals[$url] = $this->resolveLegacyFastpicViewerImage($viewerUrl);
         return $this->fastpicOriginals[$url] ?? $url;
+    }
+
+    private function resolveTurboImageHostViewerImage(string $viewerUrl): ?string
+    {
+        $parts = parse_url($viewerUrl);
+        if (!is_array($parts)) {
+            return null;
+        }
+
+        $host = strtolower((string)($parts['host'] ?? ''));
+        $path = (string)($parts['path'] ?? '');
+        if (!in_array($host, ['turboimagehost.com', 'www.turboimagehost.com'], true)
+            || !preg_match('~^/p/\d+/([^/?#]+)\.html$~i', $path, $matches)) {
+            return null;
+        }
+
+        $filename = rawurldecode($matches[1]);
+        // TurboImageHost blocks plain cURL on viewer pages. The browser-rendered
+        // page contains the exact /sp/<hash>/ original, while /t/<id>_... is only
+        // the thumbnail shown in TorrentPier posts.
+        $page = $this->fetchPageViaSolverr($viewerUrl);
+        if ($page['body'] === '' || $page['status'] < 200 || $page['status'] >= 300) {
+            return null;
+        }
+
+        if (!preg_match_all(
+            '~https?://[a-z0-9.-]+\.turboimg\.net/sp/[a-f0-9]+/[^"\'< >\s]+~i',
+            $page['body'],
+            $matches,
+        )) {
+            return null;
+        }
+
+        foreach ($matches[0] as $candidate) {
+            $candidate = html_entity_decode($candidate, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $candidatePath = (string)(parse_url($candidate, PHP_URL_PATH) ?? '');
+            if (rawurldecode(basename($candidatePath)) === $filename) {
+                return $this->normalizeGenericImageUrl($candidate, $viewerUrl);
+            }
+        }
+
+        return null;
+    }
+
+    private function resolveTurboImageHostThumbnailOriginal(string $url): string
+    {
+        if (array_key_exists($url, $this->turboImageHostOriginals)) {
+            return $this->turboImageHostOriginals[$url] ?? $url;
+        }
+
+        if (!preg_match(
+            '~^https?://[a-z0-9.-]+\.turboimg\.net/t/(\d+)_([^/?#]+)$~i',
+            $url,
+            $matches,
+        )) {
+            return $url;
+        }
+
+        $viewerUrl = 'https://www.turboimagehost.com/p/' . $matches[1] . '/'
+            . rawurlencode(rawurldecode($matches[2])) . '.html';
+        $this->turboImageHostOriginals[$url] = $this->resolveTurboImageHostViewerImage($viewerUrl);
+        return $this->turboImageHostOriginals[$url] ?? $url;
+    }
+
+    private function resolveImageBanViewerImage(string $viewerUrl, ?string $fallbackUrl = null): ?string
+    {
+        if (array_key_exists($viewerUrl, $this->imageBanOriginals)) {
+            return $this->imageBanOriginals[$viewerUrl] ?? $fallbackUrl;
+        }
+
+        $parts = parse_url($viewerUrl);
+        if (!is_array($parts)) {
+            return null;
+        }
+
+        $host = strtolower((string)($parts['host'] ?? ''));
+        $path = (string)($parts['path'] ?? '');
+        if (!in_array($host, ['imageban.ru', 'www.imageban.ru'], true)
+            || !preg_match('~^/show/(\d{4})/(\d{2})/(\d{2})/([a-f0-9]+)/([a-z0-9]+)$~i', $path, $matches)) {
+            return null;
+        }
+
+        // ImageBan permits a normal request to its viewer. Its page exposes the
+        // canonical full-size /out/ URL; NNMClub itself only embeds /thumbs/.
+        $page = $this->fetchPageViaFreshRss($viewerUrl, null);
+        if ($page['body'] === '' || $page['status'] < 200 || $page['status'] >= 300) {
+            $page = $this->fetchPageViaSolverr($viewerUrl);
+        }
+
+        $original = null;
+        if ($page['body'] !== '' && preg_match_all(
+            '~https?://i\d+\.imageban\.ru/out/' . $matches[1] . '/' . $matches[2] . '/' . $matches[3]
+                . '/' . $matches[4] . '\.(?:jpe?g|png|webp|gif|avif)~i',
+            $page['body'],
+            $candidates,
+        )) {
+            $original = $this->normalizeGenericImageUrl(
+                html_entity_decode($candidates[0][0], ENT_QUOTES | ENT_HTML5, 'UTF-8'),
+                $viewerUrl,
+            );
+        }
+
+        $this->imageBanOriginals[$viewerUrl] = $original ?? $fallbackUrl;
+        return $this->imageBanOriginals[$viewerUrl];
+    }
+
+    private function resolveImageBanThumbnailOriginal(string $url): string
+    {
+        if (array_key_exists($url, $this->imageBanOriginals)) {
+            return $this->imageBanOriginals[$url] ?? $url;
+        }
+
+        $thumbnailUrl = $url;
+        $parts = parse_url($thumbnailUrl);
+        if (is_array($parts) && strtolower((string)($parts['host'] ?? '')) === 'nnmstatic.win') {
+            parse_str((string)($parts['query'] ?? ''), $query);
+            if (is_string($query['link'] ?? null)) {
+                $thumbnailUrl = html_entity_decode($query['link'], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            }
+        }
+
+        if (!preg_match(
+            '~^https?://(i\d+\.imageban\.ru)/thumbs/(\d{4})\.(\d{2})\.(\d{2})/([a-f0-9]+)\.(jpe?g|png|webp|gif|avif)$~i',
+            $thumbnailUrl,
+            $matches,
+        )) {
+            return $url;
+        }
+
+        $viewerUrl = 'https://imageban.ru/show/' . $matches[2] . '/' . $matches[3] . '/'
+            . $matches[4] . '/' . $matches[5] . '/' . strtolower($matches[6]);
+        $fallbackUrl = 'https://' . $matches[1] . '/out/' . $matches[2] . '/' . $matches[3] . '/'
+            . $matches[4] . '/' . $matches[5] . '.' . $matches[6];
+        $original = $this->resolveImageBanViewerImage($viewerUrl, $fallbackUrl);
+        $this->imageBanOriginals[$url] = $original;
+        return $original ?? $url;
+    }
+
+    private function resolveRemoteImageUrl(string $url): string
+    {
+        return $this->resolveImageBanThumbnailOriginal(
+            $this->resolveTurboImageHostThumbnailOriginal(
+                $this->resolveFastpicThumbnailOriginal($url),
+            ),
+        );
+    }
+
+    private function resolveImageViewerUrl(string $url): ?string
+    {
+        return $this->resolveLegacyFastpicViewerImage($url)
+            ?? $this->resolveTurboImageHostViewerImage($url)
+            ?? $this->resolveImageBanViewerImage($url);
     }
 
     private function looksLikeCloudflareChallenge(string $body): bool
@@ -1259,13 +1416,16 @@ final class FullImagesScrapperExtension extends Minz_Extension
                     continue;
                 }
                 $url = $this->normalizeGenericImageUrl($anchor->getAttribute('href'), $pageUrl);
+                if ($url !== null) {
+                    $url = $this->resolveRemoteImageUrl($url);
+                }
                 if ($url !== null && $this->looksLikeDirectImageUrl($url) && !$this->looksLikeUiImage($url)) {
                     $images[$url] = true;
                     continue;
                 }
 
                 if ($url !== null) {
-                    $resolved = $this->resolveLegacyFastpicViewerImage($url);
+                    $resolved = $this->resolveImageViewerUrl($url);
                     if ($resolved !== null && !$this->looksLikeUiImage($resolved)) {
                         $images[$resolved] = true;
                     }
@@ -1284,7 +1444,7 @@ final class FullImagesScrapperExtension extends Minz_Extension
                 foreach (['title', 'data-src', 'data-url'] as $attribute) {
                     $url = $this->normalizeGenericImageUrl($var->getAttribute($attribute), $pageUrl);
                     if ($url !== null) {
-                        $url = $this->resolveFastpicThumbnailOriginal($url);
+                        $url = $this->resolveRemoteImageUrl($url);
                     }
                     // postImg is itself an image placeholder, so the URL does not
                     // need to end in .jpg/.png (some image hosts use opaque URLs).
@@ -1306,7 +1466,7 @@ final class FullImagesScrapperExtension extends Minz_Extension
                 foreach (['data-original', 'data-lazy-src', 'data-src', 'data-url', 'src'] as $attribute) {
                     $url = $this->normalizeGenericImageUrl($img->getAttribute($attribute), $pageUrl);
                     if ($url !== null) {
-                        $url = $this->resolveFastpicThumbnailOriginal($url);
+                        $url = $this->resolveRemoteImageUrl($url);
                     }
                     // An actual <img> source is already strong evidence that this is
                     // an image even when the CDN URL has no file extension.
@@ -1358,7 +1518,7 @@ final class FullImagesScrapperExtension extends Minz_Extension
             if ($url === null || $this->looksLikeUiImage($url)) {
                 return;
             }
-            $url = $this->resolveFastpicThumbnailOriginal($url);
+            $url = $this->resolveRemoteImageUrl($url);
             if ($requireImageExtension && !$this->looksLikeDirectImageUrl($url)) {
                 return;
             }
@@ -1394,7 +1554,9 @@ final class FullImagesScrapperExtension extends Minz_Extension
         // Direct original links around thumbnails.
         if (preg_match_all("~<a\\b[^>]*href=([\"'])(.*?)\\1[^>]*>~is", $post, $matches, PREG_SET_ORDER)) {
             foreach ($matches as $m) {
-                $add($m[2], true);
+                $viewer = $this->normalizeGenericImageUrl($m[2], $pageUrl);
+                $resolved = $viewer !== null ? $this->resolveImageViewerUrl($viewer) : null;
+                $add($resolved ?? $m[2], true);
             }
         }
 
