@@ -1,0 +1,8 @@
+{
+  "name": "FullImagesScrapper",
+  "author": "OpenAI",
+  "description": "Loads original/full-size images for FreshRSS entries. Supports F95Zone, Tapochek.net, RuTracker, Pornolab and generic RSS/Atom pages; includes optional local Solverr integration for Cloudflare-protected RuTracker topics.",
+  "version": "1.8.0",
+  "entrypoint": "FullImagesScrapper",
+  "type": "user"
+}

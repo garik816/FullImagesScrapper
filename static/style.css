@@ -1,0 +1,13 @@
+/* Never upscale images; only keep full-resolution F95 images inside the article width. */
+.flux_content .text img.f95-full-image,
+.flux_content .text img[src*="attachments.f95zone.to/"] {
+    display: block;
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    margin: 15px 0;
+}
+
+.flux_content .text .f95-full-image-wrap {
+    margin: 15px 0;
+}

@@ -1,0 +1,94 @@
+<?php
+declare(strict_types=1);
+/** @var FullImagesScrapperExtension $this */
+$diag = $this->getLastDiagnostic();
+?>
+<form action="<?= _url('extension', 'configure', 'e', urlencode($this->getName())) ?>" method="post">
+    <input type="hidden" name="_csrf" value="<?= FreshRSS_Auth::csrfToken() ?>" />
+
+    <div class="form-group">
+        <label class="group-name" for="f95_full_images_max_images">Количество картинок</label>
+        <div class="group-controls">
+            <input
+                type="number"
+                id="f95_full_images_max_images"
+                name="f95_full_images_max_images"
+                min="0"
+                max="100"
+                step="1"
+                value="<?= $this->getMaxImages() ?>"
+            />
+            <p class="help"><?= _i('help') ?> Максимальное количество оригинальных картинок из страницы записи. <strong>0 = без ограничения.</strong></p>
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label class="group-name" for="f95_full_images_force_all">Принудительная обработка остальных RSS</label>
+        <div class="group-controls">
+            <label>
+                <input
+                    type="checkbox"
+                    id="f95_full_images_force_all"
+                    name="f95_full_images_force_all"
+                    value="1"
+                    <?= $this->getForceAll() ? 'checked' : '' ?>
+                />
+                Дополнительно обрабатывать неизвестные RSS/Atom-сайты
+            </label>
+            <p class="help"><?= _i('help') ?> RuTracker.org, Pornolab.net и Tapochek.net обрабатываются всегда. Эта галка нужна только для остальных сайтов.</p>
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label class="group-name" for="f95_full_images_solverr_url">Solverr / FlareSolverr API</label>
+        <div class="group-controls">
+            <input
+                type="text"
+                id="f95_full_images_solverr_url"
+                name="f95_full_images_solverr_url"
+                placeholder="http://192.168.1.50:8191/v1"
+                value="<?= htmlspecialchars($this->getSolverrUrl(), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>"
+                style="min-width:32em;max-width:100%"
+            />
+            <p class="help"><?= _i('help') ?> Нужен для RuTracker при HTTP 403 / Cloudflare. Рекомендуется Solverr. Если указать только <code>http://host:8191</code>, расширение автоматически добавит <code>/v1</code>.</p>
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label class="group-name" for="f95_full_images_solverr_timeout">Таймаут Solverr</label>
+        <div class="group-controls">
+            <input type="number" id="f95_full_images_solverr_timeout" name="f95_full_images_solverr_timeout" min="20" max="180" step="1" value="<?= $this->getSolverrTimeout() ?>" /> секунд
+            <p class="help"><?= _i('help') ?> Для первого прохождения Cloudflare обычно достаточно 60–90 секунд; повторные запросы используют одну сессию.</p>
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label class="group-name" for="f95_full_images_clear_cache">Кэш</label>
+        <div class="group-controls">
+            <label>
+                <input type="checkbox" id="f95_full_images_clear_cache" name="f95_full_images_clear_cache" value="1" />
+                Очистить кэш изображений при сохранении
+            </label>
+            <p class="help"><?= _i('help') ?> Полезно после обновления расширения или если сайт временно вернул страницу без картинок.</p>
+        </div>
+    </div>
+
+    <?php if (is_array($diag)): ?>
+    <div class="form-group">
+        <label class="group-name">Последняя диагностика</label>
+        <div class="group-controls">
+            <pre style="white-space:pre-wrap;max-width:100%;overflow:auto"><?=
+                htmlspecialchars(json_encode($diag, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) ?: '', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
+            ?></pre>
+            <p class="help"><?= _i('help') ?> Показывает HTTP-код, размер ответа и количество найденных картинок для последней обработанной страницы.</p>
+        </div>
+    </div>
+    <?php endif; ?>
+
+    <div class="form-group form-actions">
+        <div class="group-controls">
+            <button type="submit" class="btn btn-important"><?= _t('gen.action.submit') ?></button>
+            <button type="reset" class="btn"><?= _t('gen.action.cancel') ?></button>
+        </div>
+    </div>
+</form>
