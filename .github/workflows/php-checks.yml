@@ -1,0 +1,25 @@
+name: PHP syntax and offline behavior
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  php:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: dom, curl, mbstring
+          coverage: none
+      - name: PHP syntax
+        run: |
+          php -l extension.php
+          php -l configure.phtml
+          find tests -type f -name '*.php' -exec php -l '{}' \;
+      - name: Pure URL and parser regression checks
+        run: php tests/smoke.php
